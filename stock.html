@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>股票模擬器</title>
+  <style>
+    .board-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 10px;
+    }
+    .title-container {
+      width: 100px; /* 固定標題區域寬度，避免影響對齊 */
+      text-align: right;
+      font-size: 18px;
+      margin-right: 10px;
+    }
+    .board {
+      display: flex;
+    }
+    .cell {
+      width: 40px;
+      height: 40px;
+      border: 1px solid #333;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+    .player {
+      width: 75%; /* 縮小至原來的3/4 */
+      height: 75%;
+      border-radius: 50%;
+      position: absolute;
+      top: 12.5%; /* 居中顯示 */
+      left: 12.5%;
+      opacity: 0.75; /* 增加顏色濃度 */
+    }
+    #moveDisplay {
+      margin-top: 10px;
+      font-size: 18px;
+    }
+    #settings {
+      margin-top: 20px;
+      display: none;
+    }
+    #settings .cell-input {
+      width: 40px;
+      margin: 5px;
+    }
+    #moveValues {
+      width: 100%;
+      margin-bottom: 10px;
+    }
+
+    /* 賽道主顏色及其棋子、起始格顏色 */
+    .track-color-1 .cell { background-color: #FFEBEE; }
+    .track-color-1 .player { background-color: rgba(198, 40, 40, 0.75); }
+    .track-color-1 .start-cell { background-color: #FFCDD2; }
+
+    .track-color-2 .cell { background-color: #E8EAF6; }
+    .track-color-2 .player { background-color: rgba(30, 136, 229, 0.75); }
+    .track-color-2 .start-cell { background-color: #C5CAE9; }
+
+    .track-color-3 .cell { background-color: #E8F5E9; }
+    .track-color-3 .player { background-color: rgba(56, 142, 60, 0.75); }
+    .track-color-3 .start-cell { background-color: #C8E6C9; }
+
+    .track-color-4 .cell { background-color: #FFF3E0; }
+    .track-color-4 .player { background-color: rgba(251, 140, 0, 0.75); }
+    .track-color-4 .start-cell { background-color: #FFE0B2; }
+
+    .track-color-5 .cell { background-color: #F3E5F5; }
+    .track-color-5 .player { background-color: rgba(106, 27, 154, 0.75); }
+    .track-color-5 .start-cell { background-color: #E1BEE7; }
+  </style>
+</head>
+<body>
+  <h1>股票模擬器</h1>
+  <button onclick="playTurn()">執行一回合</button>
+
+  <div id="moveDisplay">
+    <div id="trackMoveDisplay-1">標的1本回合移動步數：</div>
+    <div id="trackMoveDisplay-2">標的2本回合移動步數：</div>
+    <div id="trackMoveDisplay-3">標的3本回合移動步數：</div>
+    <div id="trackMoveDisplay-4">標的4本回合移動步數：</div>
+    <div id="trackMoveDisplay-5">標的5本回合移動步數：</div>
+  </div>
+
+  <!-- 五條賽道容器 -->
+  <div id="tracksContainer"></div>
+
+  <!-- 設定區塊 -->
+  <div id="settings">
+    <h3>設定賽道</h3>
+    <label>機制設定：</label>
+    <input type="radio" id="mechanism-none" name="mechanism" value="none" onchange="updateMechanism('none')" checked>
+    <label for="mechanism-none">無特殊機制</label>
+    <input type="radio" id="mechanism-pause" name="mechanism" value="pause" onchange="updateMechanism('pause')">
+    <label for="mechanism-pause">暫停交易</label>
+    <input type="radio" id="mechanism-delist" name="mechanism" value="delist" onchange="updateMechanism('delist')">
+    <label for="mechanism-delist">股票下市</label>
+    <br>
+    <label for="titleInput">標題</label>
+    <input type="text" id="titleInput" placeholder="輸入標題">
+    <div id="boardValuesContainer"></div>
+    <label for="moveValues">請輸入移動步數表 (以逗號分隔)</label>
+    <input type="text" id="moveValues" placeholder="例如：-2,-1,0,1,2">
+    <button onclick="applySettings()">應用設定</button>
+  </div>
+
+  <script>
+    const boardSize = 12;
+    const numTracks = 5;
+    let currentTrack = 0;
+    const tracks = Array.from({ length: numTracks }, (_, index) => ({
+      title: `標的${index + 1}`,
+      moveOptions: [-2, -1, 0, 1, 2],
+      boardValues: Array.from({ length: boardSize }, (_, i) => i + 1),
+      playerPosition: 5,
+      pausedRounds: 0,
+      mechanism: 'none',
+      hasPausedOnce: false // 用於記錄是否已進入過暫停格並結束暫停
+    }));
+
+    function initializeTracks() {
+      const tracksContainer = document.getElementById('tracksContainer');
+      tracksContainer.innerHTML = '';
+      tracks.forEach((track, trackIndex) => {
+        const trackContainer = document.createElement('div');
+        trackContainer.classList.add('board-container', `track-color-${trackIndex + 1}`);
+
+        const titleContainer = document.createElement('div');
+        titleContainer.className = 'title-container';
+        titleContainer.id = `titleDisplay-${trackIndex}`;
+        titleContainer.textContent = `${track.title} : `;
+
+        const board = document.createElement('div');
+        board.className = 'board';
+        board.id = `board-${trackIndex}`;
+        trackContainer.appendChild(titleContainer);
+        trackContainer.appendChild(board);
+
+        const settingsButton = document.createElement('button');
+        settingsButton.textContent = "設定";
+        settingsButton.onclick = () => toggleSettings(trackIndex);
+        trackContainer.appendChild(settingsButton);
+
+        const resetButton = document.createElement('button');
+        resetButton.textContent = "回到起始位置";
+        resetButton.onclick = () => resetToStart(trackIndex);
+        trackContainer.appendChild(resetButton);
+
+        tracksContainer.appendChild(trackContainer);
+
+        initializeBoard(trackIndex);
+      });
+    }
+
+    function initializeBoard(trackIndex) {
+      const track = tracks[trackIndex];
+      const board = document.getElementById(`board-${trackIndex}`);
+      board.innerHTML = '';
+      for (let i = 0; i < boardSize; i++) {
+        const cell = document.createElement('div');
+        cell.classList.add('cell');
+        cell.textContent = (i === 0 && track.mechanism === 'pause') ? "暫停交易" : 
+                           (i === 0 && track.mechanism === 'delist') ? "股票下市" : track.boardValues[i];
+        if (i === 5) {
+          cell.classList.add('start-cell');
+        }
+        if (i === track.playerPosition) {
+          const player = document.createElement('div');
+          player.classList.add('player');
+          cell.appendChild(player);
+        }
+        board.appendChild(cell);
+      }
+    }
+
+    function updateMoveDisplay(trackIndex, displayText) {
+      const moveDisplay = document.getElementById(`trackMoveDisplay-${trackIndex + 1}`);
+      moveDisplay.textContent = `${tracks[trackIndex].title}本回合移動步數：${displayText}`;
+    }
+
+    function playTurn() {
+      tracks.forEach((track, trackIndex) => {
+        if (track.mechanism === 'pause' && track.playerPosition === 0 && track.pausedRounds > 0) {
+          // 暫停回合，顯示「暫停」
+          track.pausedRounds--;
+          updateMoveDisplay(trackIndex, "暫停");
+          if (track.pausedRounds === 0) {
+            track.hasPausedOnce = true; // 暫停結束，標記棋子已進入過暫停格
+          }
+          return;
+        }
+
+        if (track.mechanism === 'delist' && track.playerPosition === 0) {
+          // 股票下市回合，顯示「上市」並移動至起始格
+          track.playerPosition = 5;
+          updateMoveDisplay(trackIndex, "上市");
+          initializeBoard(trackIndex);
+          return;
+        }
+
+        const move = track.moveOptions[Math.floor(Math.random() * track.moveOptions.length)];
+        const nextPosition = track.playerPosition + move;
+
+        if (track.mechanism === 'pause' && nextPosition <= 0) {
+          if (!track.hasPausedOnce) {
+            track.playerPosition = 0;
+            track.pausedRounds = 1; // 進入暫停回合
+            updateMoveDisplay(trackIndex, move);
+          } else {
+            track.playerPosition = 0;
+            updateMoveDisplay(trackIndex, move); // 不再觸發暫停
+          }
+        } else {
+          track.playerPosition = Math.min(Math.max(nextPosition, 0), boardSize - 1);
+          track.hasPausedOnce = false; // 退出暫停格後重置
+          updateMoveDisplay(trackIndex, move);
+        }
+
+        initializeBoard(trackIndex);
+      });
+    }
+
+    function resetToStart(trackIndex) {
+      const track = tracks[trackIndex];
+      track.playerPosition = 5;
+      track.pausedRounds = 0;
+      track.hasPausedOnce = false;
+      initializeBoard(trackIndex);
+      updateMoveDisplay(trackIndex, "起始位置");
+    }
+
+    function toggleSettings(trackIndex) {
+      currentTrack = trackIndex;
+      const settingsDiv = document.getElementById('settings');
+      settingsDiv.style.display = settingsDiv.style.display === 'none' ? 'block' : 'none';
+      document.getElementById('titleInput').value = tracks[currentTrack].title;
+      document.getElementById(`mechanism-${tracks[currentTrack].mechanism}`).checked = true;
+      generateBoardInputFields(currentTrack);
+    }
+
+    function generateBoardInputFields(trackIndex) {
+      const boardValuesContainer = document.getElementById('boardValuesContainer');
+      const track = tracks[trackIndex];
+      boardValuesContainer.innerHTML = '';
+      for (let i = 0; i < boardSize; i++) {
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.classList.add('cell-input');
+        input.value = track.boardValues[i];
+        input.dataset.index = i;
+        input.readOnly = i === 0 && (track.mechanism === 'pause' || track.mechanism === 'delist');
+        boardValuesContainer.appendChild(input);
+      }
+      document.getElementById('moveValues').value = track.moveOptions.join(',');
+    }
+
+    function updateMechanism(mechanism) {
+      tracks[currentTrack].mechanism = mechanism;
+      generateBoardInputFields(currentTrack);
+    }
+
+    function applySettings() {
+      const track = tracks[currentTrack];
+      track.title = document.getElementById('titleInput').value;
+      document.getElementById(`titleDisplay-${currentTrack}`).textContent = `${track.title} : `;
+
+      const inputs = document.querySelectorAll('#boardValuesContainer .cell-input');
+      inputs.forEach(input => {
+        const index = parseInt(input.dataset.index, 10);
+        if (!(index === 0 && (track.mechanism === 'pause' || track.mechanism === 'delist'))) {
+          track.boardValues[index] = isNaN(parseInt(input.value, 10)) ? input.value : parseInt(input.value, 10);
+        }
+      });
+
+      const moveInput = document.getElementById('moveValues').value;
+      if (moveInput) {
+        track.moveOptions = moveInput.split(',').map(val => parseInt(val.trim(), 10));
+      }
+
+      initializeBoard(currentTrack);
+      toggleSettings(currentTrack);
+    }
+
+    initializeTracks();
+  </script>
+</body>
+</html>
